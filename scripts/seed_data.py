@@ -1,0 +1,184 @@
+﻿"""Seed the database with realistic sample data for local development / demos.
+
+Usage:
+    python -m scripts.seed_data
+"""
+
+from __future__ import annotations
+
+import random
+from datetime import datetime, timedelta
+
+from app.database import SessionLocal, init_db
+from app.models.company import Company
+from app.models.contact import Contact
+from app.models.customer import Customer
+from app.models.deal import Deal
+from app.models.enums import (
+    CustomerStatus,
+    DealStage,
+    LeadSource,
+    LeadStatus,
+    MeetingStatus,
+    RelatedEntityType,
+    TaskPriority,
+    TaskStatus,
+)
+from app.models.lead import Lead
+from app.models.meeting import Meeting
+from app.models.note import Note
+from app.models.task import Task
+
+COMPANIES = [
+    {"name": "Northwind Traders", "industry": "Retail", "city": "Seattle", "country": "USA"},
+    {"name": "Globex Manufacturing", "industry": "Manufacturing", "city": "Detroit", "country": "USA"},
+    {"name": "Initech Software", "industry": "Software", "city": "Austin", "country": "USA"},
+    {"name": "Umbrella Health", "industry": "Healthcare", "city": "Raleigh", "country": "USA"},
+    {"name": "Stark Energy Solutions", "industry": "Energy", "city": "Houston", "country": "USA"},
+]
+
+FIRST_NAMES = ["Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Sam", "Jamie"]
+LAST_NAMES = ["Nguyen", "Patel", "Garcia", "Smith", "Kim", "Johnson", "Chen", "Brown"]
+
+
+def run() -> None:
+    init_db()
+    db = SessionLocal()
+    try:
+        if db.query(Company).count() > 0:
+            print("Database already contains data â€” skipping seed. "
+                  "Delete data/ai_powered_crm.db to reseed from scratch.")
+            return
+
+        companies = []
+        for c in COMPANIES:
+            company = Company(**c, employee_count=random.randint(20, 5000))
+            db.add(company)
+            companies.append(company)
+        db.commit()
+
+        contacts = []
+        for company in companies:
+            for _ in range(random.randint(1, 3)):
+                first = random.choice(FIRST_NAMES)
+                last = random.choice(LAST_NAMES)
+                contact = Contact(
+                    first_name=first,
+                    last_name=last,
+                    email=f"{first.lower()}.{last.lower()}@{company.name.split()[0].lower()}.com",
+                    phone="555-0100",
+                    job_title=random.choice(["VP Sales", "CTO", "Procurement Manager", "CEO"]),
+                    company_id=company.id,
+                )
+                db.add(contact)
+                contacts.append(contact)
+        db.commit()
+
+        # Leads
+        for i in range(8):
+            company = random.choice(companies)
+            contact = random.choice([c for c in contacts if c.company_id == company.id])
+            lead = Lead(
+                title=f"{company.name} â€” expansion opportunity #{i + 1}",
+                status=random.choice(list(LeadStatus)),
+                source=random.choice(list(LeadSource)),
+                score=random.randint(10, 95),
+                estimated_value=round(random.uniform(2000, 80000), 2),
+                description="Inbound interest after a product demo and follow-up call.",
+                company_id=company.id,
+                contact_id=contact.id,
+            )
+            db.add(lead)
+        db.commit()
+
+        # Customers
+        customers = []
+        for company in companies[:3]:
+            contact = random.choice([c for c in contacts if c.company_id == company.id])
+            customer = Customer(
+                name=f"{company.name} (Account)",
+                status=random.choice(list(CustomerStatus)),
+                lifetime_value=round(random.uniform(10000, 250000), 2),
+                owner="Jordan Lee",
+                company_id=company.id,
+                contact_id=contact.id,
+                notes="Long-standing account, renews annually in Q1.",
+            )
+            db.add(customer)
+            customers.append(customer)
+        db.commit()
+
+        # Deals across every pipeline stage
+        for stage in DealStage:
+            for _ in range(random.randint(1, 3)):
+                company = random.choice(companies)
+                contact = random.choice([c for c in contacts if c.company_id == company.id])
+                deal = Deal(
+                    title=f"{company.name} â€” {stage.value.replace('_', ' ').title()} Deal",
+                    stage=stage,
+                    value=round(random.uniform(3000, 120000), 2),
+                    probability={
+                        DealStage.PROSPECTING: 10,
+                        DealStage.QUALIFICATION: 25,
+                        DealStage.PROPOSAL: 50,
+                        DealStage.NEGOTIATION: 75,
+                        DealStage.CLOSED_WON: 100,
+                        DealStage.CLOSED_LOST: 0,
+                    }[stage],
+                    company_id=company.id,
+                    contact_id=contact.id,
+                    notes="Generated by the sample data seed script.",
+                )
+                db.add(deal)
+        db.commit()
+
+        # Tasks
+        for i in range(6):
+            db.add(
+                Task(
+                    title=f"Follow up on proposal #{i + 1}",
+                    status=random.choice(list(TaskStatus)),
+                    priority=random.choice(list(TaskPriority)),
+                    due_date=datetime.utcnow() + timedelta(days=random.randint(-3, 10)),
+                    assignee="Jordan Lee",
+                )
+            )
+        db.commit()
+
+        # Meetings
+        for i in range(4):
+            db.add(
+                Meeting(
+                    title=f"Quarterly business review #{i + 1}",
+                    starts_at=datetime.utcnow() + timedelta(days=random.randint(-5, 12)),
+                    ends_at=datetime.utcnow() + timedelta(days=random.randint(-5, 12), hours=1),
+                    location="Zoom",
+                    attendees="jordan.lee@ai-powered-crm.example, client-team@example.com",
+                    agenda="Review account health and roadmap.",
+                    status=random.choice(list(MeetingStatus)),
+                )
+            )
+        db.commit()
+
+        # A couple of sample notes
+        if companies:
+            db.add(
+                Note(
+                    body="Initial discovery call went well â€” strong interest in the Pro plan.",
+                    author="Jordan Lee",
+                    related_type=RelatedEntityType.COMPANY,
+                    related_id=companies[0].id,
+                )
+            )
+            db.commit()
+
+        print("âœ… Seed data created successfully.")
+        print(f"   Companies: {len(companies)}")
+        print(f"   Contacts:  {len(contacts)}")
+        print("   Leads, deals, tasks, meetings, and notes were also created.")
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    run()
